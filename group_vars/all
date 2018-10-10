@@ -1,0 +1,21 @@
+---
+
+nuage_vsd: 
+nuage_auth:
+  api_username: csproot
+  api_password: 
+  api_enterprise: csp
+  api_url: "https://{{ nuage_vsd }}:8443"
+  api_version: v5_0
+
+azure:
+  location: "westeurope"
+  zone: "1"
+  resource_group_name: "nuage"
+  nsg_vhd:
+    image_id: ""
+    vmSize: "Standard_DS2_v2"
+  vnet:
+    provision_vnet: false
+    name: "vnet"
+    cidr: "100.64.0.0/16"

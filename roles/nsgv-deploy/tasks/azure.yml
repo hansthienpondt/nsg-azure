@@ -1,0 +1,170 @@
+---
+- block:
+  - name: Set ZFB variable
+    set_fact:
+      nsg_custom_data: "{{ nuage_nsg_zfb.entities[0].result }}"
+
+  - name: Create ACL for Nuage-NSG WAN interface
+    azure_rm_securitygroup:
+      resource_group: "{{ azure.resource_group_name }}"
+      name: "{{ nuage.nuageNSGWan.name }}-SG"
+      rules:
+        - name: SSH_rule
+          description: Allow SSH
+          protocol: Tcp
+          source_port_range: "*"
+          destination_port_range: 22
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 100
+          direction: Inbound
+        - name: NSG-SSH_rule
+          description: Allow SSH
+          protocol: Tcp
+          source_port_range: "*"
+          destination_port_range: 893
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 110
+          direction: Inbound
+        - name: TLS_rule
+          description: Allow TLS
+          protocol: Tcp
+          source_port_range: "*"
+          destination_port_range: 443
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 120
+          direction: Inbound
+        - name: IPSEC1_rule
+          description: Allow SSH
+          protocol: Udp
+          source_port_range: "*"
+          destination_port_range: 500
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 130
+          direction: Inbound
+        - name: IPSEC2_rule
+          description: Allow IPSEC2
+          protocol: Udp
+          source_port_range: "*"
+          destination_port_range: 4500
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 140
+          direction: Inbound
+        - name: VXLAN_rule
+          description: Allow VXLAN
+          protocol: Udp
+          source_port_range: "*"
+          destination_port_range: 4789
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 150
+          direction: Inbound
+        - name: IPSEC3_rule
+          description: Allow IPSEC3
+          protocol: Udp
+          source_port_range: "*"
+          destination_port_range: 5770
+          source_address_prefix: Internet
+          destination_address_prefix: "*"
+          access: Allow
+          priority: 160
+          direction: Inbound
+    run_once: true
+    tags:
+      - azure-vnet
+
+  - name: Create Azure VNET
+    azure_rm_virtualnetwork:
+      resource_group: "{{ azure.resource_group_name }}"
+      name: "{{ azure.vnet.name }}"
+      address_prefixes: "{{ azure.vnet.cidr }}"
+    when: azure.vnet.provision_vnet
+    run_once: true
+    tags:
+      - azure-vnet
+
+  - name: Add WAN Subnet to Azure VNET
+    when: nuage.nuageNSGWan.name is defined
+    azure_rm_subnet:
+      resource_group: "{{ azure.resource_group_name }}"
+      name: "{{ nuage.nuageNSGWan.name }}"
+      address_prefix: "{{ nuage.nuageNSGWan.cidr }}"
+      virtual_network: "{{ azure.vnet.name }}"
+      security_group_name: "{{ nuage.nuageNSGWan.name }}-SG"
+    run_once: true
+    tags:
+      - azure-vnet
+
+  - name: Get facts for one virtual network
+    azure_rm_virtualnetwork_facts:
+      resource_group: "{{ azure.resource_group_name }}"
+      name: "{{ azure.vnet.name }}"
+    register: rc_azure_vnet
+    run_once: true
+
+  - name: Query for VNET Variable
+    set_fact:
+      nsg_vnet: "{{ item }}"
+    when: item.name == azure.vnet.name
+    with_items: "{{ rc_azure_vnet.ansible_facts.azure_virtualnetworks }}"
+    run_once: true
+
+  - name: Query for WAN Subnet Variable
+    set_fact:
+      nsg_wan_subnet: "{{ item }}"
+    when: item.name == nuage.nuageNSGWan.name
+    with_items: "{{ nsg_vnet.properties.subnets }}"
+    run_once: true
+
+- block: 
+  - name: Deploy NSG on Azure
+    azure_rm_deployment:
+      state: present
+      deployment_name: "ansible-arm-{{ inventory_hostname }}"
+      resource_group_name: "{{ azure.resource_group_name }}"
+      template: "{{ lookup('file', 'arm_deploy_nsg.json') }}"
+      location: "{{ azure.location }}"
+      parameters:
+        vmName:
+            value: "{{ inventory_hostname }}"
+        vmSize:
+            value: "{{ azure.nsg_vhd.vmSize }}"
+        nuageImageId:
+            value: "{{ azure.nsg_vhd.image_id }}"
+        vnetName:
+            value: "{{ nsg_vnet.name }}"
+        vnetId:
+            value: "{{ nsg_vnet.id }}"
+        wanSubnetId:
+            value: "{{ nsg_wan_subnet.id }}"
+        lanSubnetName:
+            value: "{{ nuage.nuageNSGLan.name }}"
+        lanSubnetCidr:
+            value: "{{ nuage.nuageNSGLan.cidr }}"
+        customData:
+            value: "{{ nsg_custom_data }}"
+        zone:
+            value: "{{ azure.zone }}"
+    register: rc_azure_nsg_create
+
+# Set public IP of nsg
+  - name: Set IP of NSG into Ansible variable
+    set_fact:
+      ansible_host: "{{ rc_azure_nsg_create.deployment.instances[0].ips[0].public_ip }}"
+
+- block:
+  - name: Get VM Network Interface facts
+    azure_rm_networkinterface_facts:
+      resource_group: "{{ azure.resource_group_name }}"
+      name: "{{ inventory_hostname }}-lan"
+    register: rc_azure_nic

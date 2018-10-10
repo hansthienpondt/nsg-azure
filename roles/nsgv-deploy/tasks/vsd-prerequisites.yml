@@ -1,0 +1,82 @@
+---
+- block:
+# Install Prerequisites
+#
+  - name: Pull facts of localhost
+    action: setup
+    run_once: true
+
+  - name: Install latest urllib3 library
+    pip: name="urllib3" state=latest
+    run_once: true
+
+  - name: Install azure-module and vspk via pip
+    pip: name="{{ item }}"
+    with_items:
+      - cryptography
+      - vspk
+      - ansible[azure]
+      - docopt
+      - python-qpid-proton
+    run_once: true
+
+- block:
+# Create NSGV Instance in VSD
+  - name: Finding Enterprise
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: Enterprise
+      command: find
+      properties:
+        name: "{{ provision_vsd.enterprise }}"
+    register: nuage_enterprise
+
+  - name: Ensure NSG Gateway is provisioned in the enterprise
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: NSGateway
+      parent_id: "{{ nuage_enterprise.id }}"
+      parent_type: Enterprise
+      match_filter: "name == '{{ inventory_hostname }}'"
+      state: present
+      properties:
+        name: "{{ inventory_hostname }}"
+        template_id: "{{ provision_vsd.nsg_template_id }}"
+    register: nuage_nsg
+
+  - debug: var=nuage_nsg verbosity=1
+
+  - name: Find port1 of the NSG-AMI
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: NSPort
+      parent_type: NSGateway
+      parent_id: "{{ nuage_nsg.id }}"
+      command: find
+      properties:
+        name: "port1"
+    register: nuage_nsg_port1
+
+  - name: Ensure 1:1 NAT is enabled on port1 of the NSG-AMI
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: NSPort
+      id: "{{ nuage_nsg_port1.id }}"
+      state: present
+      properties:
+        nat_traversal: "ONE_TO_ONE_NAT"
+
+  - name: Create Job to download auto-bootstrap info
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: Job
+      parent_id: "{{ nuage_enterprise.id }}"
+      parent_type: Enterprise
+      state: present
+      properties:
+        command: GET_ZFB_INFO
+        parameters: '{ "mediaType": "YAML", "NSGType": "NSG-AMI", "associatedEntityType": "nsgateway", "associatedEntityID": "{{ nuage_nsg.id }}" }'
+    register: nuage_nsg_zfb
+
+  - debug: var=nuage_nsg_zfb verbosity=1
+

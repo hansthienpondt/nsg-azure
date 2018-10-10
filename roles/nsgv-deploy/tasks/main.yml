@@ -1,0 +1,33 @@
+---
+- import_tasks: vsd-prerequisites.yml
+  static: no
+  tags:
+    - vsd-prereq
+
+- import_tasks: azure.yml
+  when: target_server_type is match("azure")
+  static: no
+  tags:
+    - azure
+
+# Attach NSGV into domain
+- name: Attach NSGV-LAN into subnet
+  import_tasks: "attach_cloud_nsg.yml"
+  vars:
+    domain_name: "{{ provision_vsd.domain_name }}"
+    zone_name: "{{ provision_vsd.zone_name }}"
+    subnet_name: "{{ nuage.nuageNSGLan.name }}"
+    subnet_cidr: "{{ nuage.nuageNSGLan.cidr }}"
+    subnet_gw_mac: "{{ rc_azure_nic.ansible_facts.azure_networkinterfaces[0].properties.macAddress.split('-') | join(':') }}"
+    nsg_ip: "{{ rc_azure_nic.ansible_facts.azure_networkinterfaces[0].properties.ipConfigurations[0].properties.privateIPAddress }}"
+    brport_name: "{{ inventory_hostname }}-lan"
+    vpc_cidr: "{{ azure.vnet.cidr }}"
+  when: provision_vsd is defined
+  tags:
+     - vsd-post
+# Bootstrap the NSG
+
+- name: Bootstrap NSG
+  import_tasks: "bootstrap.yml"
+  tags:
+    - vsd-bootstrap

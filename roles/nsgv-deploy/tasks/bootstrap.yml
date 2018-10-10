@@ -1,0 +1,82 @@
+---
+# Set of sasks to attach an NSG in a particular zone
+#
+# Required input parameters:
+#  - nuage_auth
+#  - nuage_enterprise
+#  - nuage_nsg
+#  - nuage_nsg_installer
+#  - nuage_proxy
+
+- name: Find bootstrap objects to NSG
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: Bootstrap
+    parent_id: "{{ nuage_nsg.id }}"
+    parent_type: NSGateway
+    command: find
+  register: nuage_existing_bootstraps
+
+- block:
+  - name: Add installer to first bootstrap ID for NSG
+    connection: local
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: Bootstrap
+      id: "{{ nuage_existing_bootstraps.entities[0].ID }}"
+      state: present
+      properties:
+        installer_id: "{{ provision_vsd.nuage_nsg_installer.id }}"
+
+  - name: Send Job notification
+    connection: local
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: Job
+      parent_id: "{{ nuage_nsg.id }}"
+      parent_type: NSGateway
+      state: present
+      properties:
+        command: "NOTIFY_NSG_REGISTRATION"
+
+  - name: Set bootstrap execution string
+    set_fact:
+      extract_cmd: "grep -A 42 '\"notificationType\": \"NOTIFY_NSG_REGISTRATION\"'  /var/log/vns/na.log | grep -B 30 \"{{ nuage_nsg.id }}\"  | tail -n 31 | head -n 1 | cut -f4 -d\\\""
+
+  - name: Extract bootstrap URL from log files
+    shell: "{{ extract_cmd }}" 
+    delegate_to: "{{ provision_vsd.nuage_proxy }}"
+    register: nsg_registration
+
+  - name: Activate NSG (this will fail as ssh connection will drop during step)
+    shell: 'sudo nuage-bootstrap-cli -u "{{ nsg_registration.stdout }}"'
+    register: nsg_activation_output
+    async: 1
+    poll: 0
+    ignore_errors: yes
+
+  - name: sleep for 10 seconds to allow NSG to successfully bootstrap
+    wait_for: timeout=10
+    delegate_to: localhost
+
+  - name: Get updated bootstrap info from VSD
+    connection: local
+    nuage_vspk:
+      auth: "{{ nuage_auth }}"
+      type: Bootstrap
+      parent_id: "{{ nuage_nsg.id }}"
+      parent_type: NSGateway
+      command: find
+    register: nuage_updated_bootstraps
+
+  - name: Verify if NSG has been successfully bootstrapped
+    assert: 
+      that: 'nuage_updated_bootstraps.entities[0].status == "ACTIVE"'
+
+  when: "nuage_existing_bootstraps.entities[0].status !=  'ACTIVE'"
+
+
+
+
+

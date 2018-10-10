@@ -1,0 +1,151 @@
+---
+# Set of sasks to attach an NSG in a particular zone
+#
+# Required input parameters:
+#  - nuage_auth
+#  - nuage_enterprise
+#  - domain_name
+#  - zone_name
+#  - subnet_name
+#  - subnet_cidr
+#  - subnet_gw_mac
+#  - nsg_ip (in address/prefixlen format)
+#  - brport_name
+#  - nuage_nsg_port_vlan
+#  - vpc_cidr
+#
+#  Useful output parameters
+#  - nuage_nsg_bridge_port
+#  - nuage_nsg_subnet
+
+- name: Finding domain in Enterprise
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: Domain
+    command: find
+    parent_id: "{{ nuage_enterprise.id }}"
+    parent_type: Enterprise
+    properties:
+      name: "{{ domain_name }}"
+  register: nuage_domain
+
+- name: Finding zone
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: Zone
+    state: present
+    parent_id: "{{ nuage_domain.id }}"
+    parent_type: "Domain"
+    properties:
+      name: "{{ zone_name }}"
+  register: nuage_zone
+
+- name: Create the subnet in Nuage Zone
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: Subnet
+    parent_id: "{{ nuage_zone.id }}"
+    parent_type: Zone
+    state: present
+    match_filter: "name == '{{ subnet_name }}'"
+    properties:
+      name: '{{ subnet_name }}'
+      address: "{{ subnet_cidr | ipaddr('network') }}"
+      netmask: "{{ subnet_cidr | ipaddr('netmask') }}"
+      gateway: "{{ nsg_ip }}"
+      gateway_mac_address: "{{ subnet_gw_mac }}"
+  register: nuage_nsg_subnet
+  ignore_errors: true
+
+- name: Find the subnet in Nuage Zone when subnet was already created
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: Subnet
+    parent_id: "{{ nuage_zone.id }}"
+    parent_type: Zone
+    command: find
+    properties:
+      name: '{{ subnet_name }}'
+  register: nuage_nsg_subnet_find
+  when: nuage_nsg_subnet.failed
+
+- set_fact:
+    subnet_id: "{{ nuage_nsg_subnet.id | default(nuage_nsg_subnet_find.id) }}"
+
+- name: Find port2 of the NSG-AMI
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: NSPort
+    parent_type: NSGateway
+    parent_id: "{{ nuage_nsg.id }}"
+    command: find
+    properties:
+      name: "port2"
+  register: nuage_nsg_port2
+
+# Add untagged interface
+- name: Add untagged interface to port2 of NSG-AMI
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: VLAN
+    parent_type: NSPort
+    parent_id: "{{ nuage_nsg_port2.id }}"
+    state: present
+    match_filter: "value == 0"
+    properties:
+      value: 0
+  register: nuage_nsg_port2_vlan
+
+- name: Create the BridgePort for the NSG-Port
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: VPort
+    parent_type: "Subnet"
+    parent_id: "{{ subnet_id }}"
+    state: present
+    match_filter: "name == '{{ brport_name }}'"
+    properties:
+      name: '{{ brport_name }}'
+      vlanid: "{{ nuage_nsg_port2_vlan.id }}"
+      type: "BRIDGE"
+      address_spoofing: "ENABLED"
+  register: nuage_nsg_bridge_port
+
+- name: Add Bridge Interface
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: BridgeInterface
+    parent_id: "{{ nuage_nsg_bridge_port.id }}"
+    parent_type: VPort
+    state: present
+    match_filter: "name == '{{ brport_name }}-if'"
+    properties:
+      name: '{{ brport_name }}-if'
+  register: nuage_nsg_bridge_if
+
+- name: Create static route in domain to steer traffic to public cloud (this will show failed when static route was already deployed)
+  connection: local
+  nuage_vspk:
+    auth: "{{ nuage_auth }}"
+    type: StaticRoute
+    state: present
+    parent_id: "{{ nuage_domain.id }}"
+    parent_type: "Domain"
+    properties:
+      ip_type: "IPV4"
+      type: "OVERLAY"
+      address: "{{ vpc_cidr | ipaddr('network') }}"
+      netmask: "{{ vpc_cidr | ipaddr('netmask') }}"
+      next_hop_ip: "{{ subnet_cidr | ipaddr('1') | ipaddr('address')  }}"
+  register: nuage_staticroute
+  ignore_errors: true
+  run_once: true
+

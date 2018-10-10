@@ -1,0 +1,26 @@
+---
+#*** WARNING ***
+# This is a generated file. Manual changes to this file
+# will be lost if reset-build or build is run
+#
+target_server_type: azure
+
+provision_vsd:
+  nuage_proxy: "nuage-proxy.pj.eu.nuagedemo.net"
+  enterprise: "HanZure"
+  nsg_template_id: "7b0b710f-cd3e-4640-a0c8-132beadc7ea9"
+  nuage_nsg_installer:
+      id: "a8cdd80a-35a1-49a7-9b96-a82628cc63b4"
+  domain_name: "Azure-L3"
+  zone_name: "Azure-EU-WEST"
+
+#debug_nsg_deploy: True
+
+nuage:
+  nuageNSGWan: 
+     cidr: "{{ azure.vnet.cidr | ipsubnet(24,1) }}"
+     name: "HansNSG-wan"
+  nuageNSGLan: 
+     cidr: "{{ azure.vnet.cidr | ipsubnet(24,3) }}"
+     name: "Azure-EU-WEST-NSG2"
+

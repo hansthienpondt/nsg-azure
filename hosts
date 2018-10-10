@@ -1,0 +1,5 @@
+[nsgvs]
+HansNSG1 ansible_connection=local ansible_ssh_user=nuage ansible_ssh_pass=EU4eEKj97J ansible_port=893
+HansNSG2 ansible_connection=local ansible_ssh_user=nuage ansible_ssh_pass=EU4eEKj97J ansible_port=893
+#HansNSG3 ansible_connection=local ansible_ssh_user=nuage ansible_ssh_pass=EU4eEKj97J ansible_port=893
+#HansNSG4 ansible_connection=local ansible_ssh_user=nuage ansible_ssh_pass=EU4eEKj97J ansible_port=893

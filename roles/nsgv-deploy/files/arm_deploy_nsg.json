@@ -1,0 +1,210 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "defaultValue": "[resourceGroup().location]",
+            "type": "string",
+            "metadata": {
+                "description": "Location for all resources."
+            }
+        },
+        "vmName": {
+            "type": "string"
+        },
+        "vmSize": {
+            "type": "string"
+        },
+        "nuageImageId": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource ID for the Image"
+            }
+        },
+        "vnetName": {
+            "type": "string"
+        },
+        "vnetId": {
+            "type": "string"
+        },
+        "lanSubnetName": {
+            "type": "string"
+        },
+        "lanSubnetCidr": {
+            "type": "string"
+        }, 
+        "wanSubnetId": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource ID for the Lan Subnet for NSGV"
+            }
+        },
+        "adminUsername": {
+            "defaultValue": "nuage",
+            "type": "string",
+            "metadata": {
+                "description": "Username for the Virtual Machine."
+            }
+        },
+        "adminPassword": {
+            "defaultValue": "EU4eEKj97J",
+            "type": "secureString",
+            "metadata": {
+                "description": "Password for the Virtual Machine."
+            }
+        },
+        "customData": {
+            "type": "string",
+            "metadata": {
+                "description": "cloud-init bootstrap agent data"
+            }
+        },
+        "zone": {
+            "type": "string"
+        }
+    },
+    "variables": {
+        "publicIpAddressType": "Static",
+        "publicIpAddressSku": "Standard",
+        "publicIpAddressSuffix": "-publicip",
+        "publicIpAddressName": "[concat(parameters('vmName'), variables('networkWanInterfaceSuffix'), variables('publicIpAddressSuffix'))]",
+        "networkWanInterfaceSuffix": "-wan",
+        "networkWanInterfaceName": "[concat(parameters('vmName'), variables('networkWanInterfaceSuffix'))]",
+        "networkLanInterfaceSuffix": "-lan",
+        "networkLanInterfaceName": "[concat(parameters('vmName'), variables('networkLanInterfaceSuffix'))]",
+        "osDiskType": "Premium_LRS"
+    },
+    "resources": [
+        {
+            "name": "[variables('publicIpAddressName')]",
+            "type": "Microsoft.Network/publicIpAddresses",
+            "apiVersion": "2018-08-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIpAllocationMethod": "[variables('publicIpAddressType')]"
+            },
+            "sku": {
+                "name": "[variables('publicIpAddressSku')]"
+            },
+            "zones": [
+                "[parameters('zone')]"
+            ],
+            "tags": {}
+        },
+        {
+            "apiVersion": "2018-08-01",
+            "name": "[concat(parameters('vnetName'), '/', parameters('lanSubnetName'))]",
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "properties": {
+                "addressPrefix": "[parameters('lanSubnetCidr')]"
+            }
+        },
+        {
+            "name": "[variables('networkWanInterfaceName')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2018-04-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[parameters('wanSubnetId')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIpAddress": {
+                                "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/publicIpAddresses', variables('publicIpAddressName'))]"
+                            }
+                        }
+                    }
+                ]
+            },
+            "tags": {}
+        },
+        {
+            "name": "[variables('networkLanInterfaceName')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2018-04-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat(parameters('vnetId'),'/subnets/', parameters('lanSubnetName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[concat(parameters('vnetId'),'/subnets/', parameters('lanSubnetName'))]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic"
+                        }
+                    }
+                ],
+                "enableIPForwarding": true
+            },
+            "tags": {}
+        },
+        {
+            "name": "[parameters('vmName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2018-04-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/networkInterfaces/', variables('networkWanInterfaceName'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', variables('networkLanInterfaceName'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "storageProfile": {
+                    "osDisk": {
+                        "createOption": "fromImage",
+                        "managedDisk": {
+                            "storageAccountType": "[variables('osDiskType')]"
+                        }
+                    },
+                    "imageReference": {
+                        "id": "[parameters('nuageImageId')]"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkWanInterfaceName'))]",
+                            "properties": {
+                                "primary": true
+                            }
+                        },
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkLanInterfaceName'))]",
+                            "properties": {
+                                "primary": false
+                            }
+                        },
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[parameters('vmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                }
+            },
+            "tags": {},
+            "zones": [
+                "[parameters('zone')]"
+            ]
+        }
+    ],
+    "outputs": {
+        "nuagePublicIpAddressRef": {
+            "type": "String",
+            "value": "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressName'))]"
+        }
+    }
+}

@@ -1,0 +1,22 @@
+---
+- name: Create the host_vars directory
+  file:
+    path: "{{ inventory_dir }}/host_vars/"
+    state: directory
+
+- name: Create hosts file
+  template:
+    src: hosts.j2
+    dest: "{{ inventory_dir }}/hosts"
+    backup: no
+
+- name: Create the group_vars directory
+  file:
+    path: "{{ inventory_dir }}/group_vars/"
+    state: directory
+
+- name: Create group_vars/all file
+  template:
+    src: group_vars.all.j2
+    dest: "{{ inventory_dir }}/group_vars/all"
+    backup: false
